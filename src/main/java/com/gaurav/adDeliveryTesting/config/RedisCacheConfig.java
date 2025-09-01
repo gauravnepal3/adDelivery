@@ -41,7 +41,7 @@ public class RedisCacheConfig {
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient(RedisProperties props) {
         Config cfg = new Config();
-        cfg.setThreads(48);        // adjust to ~1–2x cores
+        cfg.setThreads(54);        // adjust to ~1–2x cores
         cfg.setNettyThreads(96);
 
         var single = cfg.useSingleServer()
