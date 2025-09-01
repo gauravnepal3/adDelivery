@@ -50,6 +50,10 @@ public class AdDeliveryController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
+    @GetMapping("/test")
+    public ResponseEntity<String> tester() {
+       return new ResponseEntity<>("Hello World",HttpStatus.OK);
+    }
 
     @GetMapping("/serveByParams")
     public ResponseEntity<?> serveByParams(@RequestParam("country") String countryDate, @RequestParam("language") String languageDate,
