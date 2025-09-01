@@ -1,9 +1,6 @@
 package com.gaurav.adDeliveryTesting.model;
 
-import jakarta.persistence.CascadeType;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.OneToOne;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -24,6 +21,6 @@ public class Campaign implements Serializable {
     private BigDecimal remainingBudget;
     private BigDecimal biddingRate;
 
-    @OneToOne(mappedBy = "campaign", cascade = CascadeType.ALL)
+    @OneToOne(fetch = FetchType.LAZY, mappedBy = "campaign", cascade = CascadeType.ALL, optional = false)
     private CampaignFilters filters;
 }

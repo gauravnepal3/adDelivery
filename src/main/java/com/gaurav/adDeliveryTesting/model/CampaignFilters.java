@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 import java.io.Serializable;
-import java.util.List;
+
 
 @Data
 @Entity
@@ -14,26 +14,27 @@ public class CampaignFilters implements Serializable {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "campaign_id", nullable = false, unique = true)
     private Campaign campaign;
 
     @ElementCollection
     @CollectionTable(name = "campaign_countries", joinColumns = @JoinColumn(name = "filter_id"))
     @Column(name = "country")
-    private List<String> countries;
+    private java.util.Set<String> countries = new java.util.HashSet<>();
 
     @ElementCollection
     @CollectionTable(name = "campaign_languages", joinColumns = @JoinColumn(name = "filter_id"))
     @Column(name = "language")
-    private List<String> languages;
+    private java.util.Set<String> languages = new java.util.HashSet<>();
 
     @ElementCollection
     @CollectionTable(name = "campaign_oses", joinColumns = @JoinColumn(name = "filter_id"))
     @Column(name = "os")
-    private List<String> osList;
+    private java.util.Set<String> osList = new java.util.HashSet<>();
 
     @ElementCollection
     @CollectionTable(name = "campaign_browsers", joinColumns = @JoinColumn(name = "filter_id"))
     @Column(name = "browser")
-    private List<String> browsers;
+    private java.util.Set<String> browsers = new java.util.HashSet<>();
 }

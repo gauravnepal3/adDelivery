@@ -3,6 +3,12 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SERVER_PORT=8080
+      - JAVA_OPTS=${JAVA_OPTS:-}
+    ports:
+      - "8080:8080"
     networks:
       - mynetwork
     depends_on:
@@ -11,23 +17,43 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # (optional) simple healthcheck so depends_on works reliably
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
-    image: 'redis:7-alpine'
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
-    volumes:
-      - redis_data:/data
+    image: redis:7-alpine
+    container_name: redis
+    command:
+      - redis-server
+      - --save ""
+      - --appendonly no
+      - --tcp-backlog 511
+      - --timeout 0
+      - --tcp-keepalive 60
+      - --requirepass ${REDIS_PASSWORD}
+      - --maxclients 20000
     ports:
       - "6379:6379"
     networks:
       - mynetwork
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
+    sysctls:
+      net.core.somaxconn: "65535"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
-
+    volumes:
+      - redis_data:/data
   postgres:
     image: 'postgres:15-alpine'
     env_file:
