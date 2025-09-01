@@ -1,14 +1,18 @@
 services:
   java-app:
     build: .
-    container_name: java-app
     env_file:
       - .env
     environment:
       - SPRING_PROFILES_ACTIVE=docker
       - SERVER_PORT=8080
-      # keep heap modest for low GC latency
-      - JAVA_TOOL_OPTIONS=-XX:+UseG1GC -XX:MaxGCPauseMillis=50 -XX:ActiveProcessorCount=50 -Xms2g -Xmx2g
+      - JAVA_TOOL_OPTIONS= >
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=50
+        -XX:+AlwaysPreTouch
+        -XX:+PerfDisableSharedMem
+        -Xms2g -Xmx2g
+        -XX:ActiveProcessorCount=0
     ports:
       - "8080:8080"
     networks:
@@ -18,32 +22,25 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    ulimits:
-      nofile:
-        soft: 200000
-        hard: 200000
+    restart: unless-stopped
+    # (optional) simple healthcheck so depends_on works reliably
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
       interval: 10s
       timeout: 5s
       retries: 10
-    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: redis
     command:
       - redis-server
-      # perf-oriented (no persistence) for load tests
       - --save ""
       - --appendonly no
-      # networking/tcp
       - --tcp-backlog 511
       - --timeout 0
       - --tcp-keepalive 60
-      # auth
       - --requirepass ${REDIS_PASSWORD}
-      # capacity
       - --maxclients 20000
     ports:
       - "6379:6379"
@@ -53,19 +50,18 @@ services:
       nofile:
         soft: 200000
         hard: 200000
-    # NOTE: sysctls not used here to stay portable across Desktop/Windows/macOS
+    sysctls:
+      net.core.somaxconn: "65535"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
     volumes:
       - redis_data:/data
-
   postgres:
-    image: postgres:15-alpine
-    container_name: postgres
+    image: 'postgres:15-alpine'
     env_file:
       - .env
     environment:
@@ -85,10 +81,12 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-networks:
-  mynetwork:
-    driver: bridge
 
 volumes:
   postgres_data:
   redis_data:
+  letsencrypt:
+
+networks:
+  mynetwork:
+    driver: bridge
