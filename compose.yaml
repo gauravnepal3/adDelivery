@@ -6,7 +6,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=docker
       - SERVER_PORT=8080
-      - JAVA_TOOL_OPTIONS= >
+      - JAVA_TOOL_OPTIONS=
         -XX:+UseG1GC
         -XX:MaxGCPauseMillis=50
         -XX:+AlwaysPreTouch
