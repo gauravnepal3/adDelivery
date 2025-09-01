@@ -40,27 +40,22 @@ public class RedisCacheConfig {
 
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient(RedisProperties props) {
-        String address = "redis://" + props.getHost() + ":" + props.getPort();
         Config cfg = new Config();
-
-        // --- Tune thread pools ---
-        cfg.setThreads(32);        // Redisson worker threads (internal tasks, callbacks, pub/sub handling)
-        cfg.setNettyThreads(64);   // Netty event loop threads for networking
+        cfg.setThreads(48);        // adjust to ~1–2x cores
+        cfg.setNettyThreads(96);
 
         var single = cfg.useSingleServer()
-                .setAddress(address)
-                .setConnectionPoolSize(2048)             // connections per client
-                .setConnectionMinimumIdleSize(64)
-                .setSubscriptionConnectionPoolSize(256) // for pub/sub if used
-                .setIdleConnectionTimeout(10000)
-                .setConnectTimeout(1000)
-                .setTimeout(1000)
+                .setAddress((props.getSsl().isEnabled() ? "rediss://" : "redis://") + props.getHost() + ":" + props.getPort())
+                .setPassword((props.getPassword() != null && !props.getPassword().isBlank()) ? props.getPassword() : null)
+                .setConnectionPoolSize(3000)            // bigger pool to avoid "Unable to acquire connection"
+                .setConnectionMinimumIdleSize(256)
+                .setSubscriptionConnectionPoolSize(128)
+                .setIdleConnectionTimeout(8000)
+                .setConnectTimeout(600)
+                .setTimeout(700)                        // hard cap latency
                 .setRetryAttempts(1)
-                .setRetryInterval(100);
-
-        if (props.getPassword() != null && !props.getPassword().isBlank()) {
-            single.setPassword(props.getPassword());
-        }
+                .setRetryInterval(100)
+                .setPingConnectionInterval(0);          // reduce chatter
 
         return Redisson.create(cfg);
     }

@@ -49,16 +49,29 @@ public class AdDeliveryService implements Serializable {
 
     @Transactional
     public Optional<Campaign> serveAd(String country, String language, String os, String browser) {
-        // 1) Fast path: pick from Redis ZSET (with your wildcard logic inside cacheService)
-        Integer campaignId = cacheService.getBestCampaignId(country, language, os, browser);
-        if (campaignId != null) {
-            Optional<Campaign> served = tryServeCounter(campaignId, country, language, os, browser);
-            if (served.isPresent()) return served;
+
+        // 1) Fast path: single RT, atomic in Redis
+        CampaignCacheService.SelectionResult sel = cacheService.pickAndSpendOne(country, language, os, browser);
+
+        if (sel.code == 1 || sel.code == 2) {
+            // served; if at zero (2) clean from filter sets
+            if (sel.code == 2 && sel.campaignId != null) {
+                cacheService.removeCampaignEverywhere(sel.campaignId);
+            }
+            if (sel.campaignId != null) {
+                return repo.findById(sel.campaignId); // light read for link + payload
+            }
+            return Optional.empty();
+        }
+        if (sel.code == 3) {
+            // insufficient – evict and fall through to DB fallback
+            if (sel.campaignId != null) {
+                cacheService.removeCampaignEverywhere(sel.campaignId);
+            }
         }
 
-        // 2) DB fallback: filter & pick best bid, with FAIR tie-breaker across equal bids
+        // 2) DB fallback: compute best and warm Redis
         List<CampaignFilters> filters = filterRepo.findAll();
-
         List<Campaign> matching = filters.stream()
                 .filter(f -> (country == null || f.getCountries().contains(country)))
                 .filter(f -> (language == null || f.getLanguages().contains(language)))
@@ -67,46 +80,33 @@ public class AdDeliveryService implements Serializable {
                 .map(CampaignFilters::getCampaign)
                 .filter(c -> c.getRemainingBudget().compareTo(BigDecimal.ZERO) > 0)
                 .toList();
-
         if (matching.isEmpty()) return Optional.empty();
 
-        // Find the top bid value
-        BigDecimal topBid = matching.stream()
-                .map(Campaign::getBiddingRate)
-                .max(BigDecimal::compareTo)
-                .orElse(BigDecimal.ZERO);
+        BigDecimal topBid = matching.stream().map(Campaign::getBiddingRate).max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+        List<Campaign> top = matching.stream().filter(c -> c.getBiddingRate().compareTo(topBid) == 0).toList();
+        if (top.isEmpty()) return Optional.empty();
 
-        // Collect all campaigns that have the same top bid
-        List<Campaign> topCampaigns = matching.stream()
-                .filter(c -> c.getBiddingRate().compareTo(topBid) == 0)
-                .toList();
+        Campaign chosen = top.get(ThreadLocalRandom.current().nextInt(top.size()));
 
-        if (topCampaigns.isEmpty()) return Optional.empty();
-
-        // Random tie-breaker among same-bid campaigns
-        Campaign chosen = topCampaigns.get(ThreadLocalRandom.current().nextInt(topCampaigns.size()));
-
-        Optional<Campaign> served = tryServeCounter(chosen.getCampaignId(), country, language, os, browser);
-
-        if (served.isPresent()) {
-            Campaign warmed = served.get();
-            CampaignFilters cf = warmed.getFilters();
-            if (cf != null) {
-                for (String ctry : cf.getCountries()) {
-                    for (String lang : cf.getLanguages()) {
-                        for (String osItem : cf.getOsList()) {
-                            for (String br : cf.getBrowsers()) {
-                                cacheService.addCampaign(warmed, ctry, lang, osItem, br);
-                            }
-                        }
-                    }
-                }
-            }
+        // warm the exact combo + all combos for chosen
+        cacheService.addCampaign(chosen, country, language, os, browser);
+        if (chosen.getFilters() != null) {
+            var cf = chosen.getFilters();
+            for (String ctry : cf.getCountries())
+                for (String lang : cf.getLanguages())
+                    for (String osItem : cf.getOsList())
+                        for (String br : cf.getBrowsers())
+                            cacheService.addCampaign(chosen, ctry, lang, osItem, br);
         }
-        return served;
+
+        // Try again via Redis atomic (now should hit)
+        CampaignCacheService.SelectionResult sel2 = cacheService.pickAndSpendOne(country, language, os, browser);
+        if (sel2.code == 1 || sel2.code == 2) {
+            if (sel2.code == 2 && sel2.campaignId != null) cacheService.removeCampaignEverywhere(sel2.campaignId);
+            return sel2.campaignId != null ? repo.findById(sel2.campaignId) : Optional.empty();
+        }
+        return Optional.empty();
     }
-
-
     private Optional<Campaign> tryServeCounter(Integer campaignId,
                                                String country, String language, String os, String browser) {
         var codec = org.redisson.client.codec.StringCodec.INSTANCE;
