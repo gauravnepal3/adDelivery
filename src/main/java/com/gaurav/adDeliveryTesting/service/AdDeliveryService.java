@@ -71,40 +71,8 @@ public class AdDeliveryService implements Serializable {
         }
 
         // 2) DB fallback: compute best and warm Redis
-        List<CampaignFilters> filters = filterRepo.findAll();
-        List<Campaign> matching = filters.stream()
-                .filter(f -> (country == null || f.getCountries().contains(country)))
-                .filter(f -> (language == null || f.getLanguages().contains(language)))
-                .filter(f -> (os == null || f.getOsList().contains(os)))
-                .filter(f -> (browser == null || f.getBrowsers().contains(browser)))
-                .map(CampaignFilters::getCampaign)
-                .filter(c -> c.getRemainingBudget().compareTo(BigDecimal.ZERO) > 0)
-                .toList();
-        if (matching.isEmpty()) return Optional.empty();
-
-        BigDecimal topBid = matching.stream().map(Campaign::getBiddingRate).max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
-        List<Campaign> top = matching.stream().filter(c -> c.getBiddingRate().compareTo(topBid) == 0).toList();
-        if (top.isEmpty()) return Optional.empty();
-
-        Campaign chosen = top.get(ThreadLocalRandom.current().nextInt(top.size()));
-
-        // warm the exact combo + all combos for chosen
-        cacheService.addCampaign(chosen, country, language, os, browser);
-        if (chosen.getFilters() != null) {
-            var cf = chosen.getFilters();
-            for (String ctry : cf.getCountries())
-                for (String lang : cf.getLanguages())
-                    for (String osItem : cf.getOsList())
-                        for (String br : cf.getBrowsers())
-                            cacheService.addCampaign(chosen, ctry, lang, osItem, br);
-        }
-
-        // Try again via Redis atomic (now should hit)
-        CampaignCacheService.SelectionResult sel2 = cacheService.pickAndSpendOne(country, language, os, browser);
-        if (sel2.code == 1 || sel2.code == 2) {
-            if (sel2.code == 2 && sel2.campaignId != null) cacheService.removeCampaignEverywhere(sel2.campaignId);
-            return sel2.campaignId != null ? repo.findById(sel2.campaignId) : Optional.empty();
-        }
+        // 2) DO NOT fall back to DB on the request path under load.
+        //    Return 204 for a miss; let warmup keep Redis hot.
         return Optional.empty();
     }
     private Optional<Campaign> tryServeCounter(Integer campaignId,

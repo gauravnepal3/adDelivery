@@ -1,70 +1,70 @@
 services:
-  java-app:
-    build: .
-    env_file:
-      - .env
-    environment:
-      # ---- Spring profile & port ----
-      SPRING_PROFILES_ACTIVE: docker
-      SERVER_PORT: "8080"
+ java-app:
+  build: .
+  env_file:
+    - .env
+  environment:
+    # ---- Spring profile & port ----
+    SPRING_PROFILES_ACTIVE: docker
+    SERVER_PORT: "8080"
 
-      # ---- JVM: many lightweight threads, low GC pause, full cores ----
-      # Use ALL host cores by default (override if you want fewer)
-      JAVA_TOOL_OPTIONS: >
-        -XX:+UseG1GC
-        -XX:MaxGCPauseMillis=50
-        -XX:+AlwaysPreTouch
-        -XX:+PerfDisableSharedMem
-        -Xms2g -Xmx2g
-        -XX:ActiveProcessorCount=0
+    # ---- JVM: many lightweight threads, low GC pause, full cores ----
+    # Use ALL host cores by default (override if you want fewer)
+    JAVA_TOOL_OPTIONS: >
+      -XX:+UseG1GC
+      -XX:MaxGCPauseMillis=50
+      -XX:+AlwaysPreTouch
+      -XX:+PerfDisableSharedMem
+      -Xms2g -Xmx2g
+      -XX:ActiveProcessorCount=0
 
-      # ---- App-specific HIGH-QPS knobs (only effective if your code reads them) ----
-      # If you've parameterized Redisson via @Value, these will apply.
-      REDISSON_THREADS: "48"
-      REDISSON_NETTY_THREADS: "96"
-      REDISSON_POOL_SIZE: "3000"
-      REDISSON_MIN_IDLE: "256"
-      REDISSON_TIMEOUT_MS: "700"
+    # ---- App-specific HIGH-QPS knobs (only effective if your code reads them) ----
+    # If you've parameterized Redisson via @Value, these will apply.
+    REDISSON_THREADS: "48"
+    REDISSON_NETTY_THREADS: "96"
+    REDISSON_POOL_SIZE: "3000"
+    REDISSON_MIN_IDLE: "256"
+    REDISSON_TIMEOUT_MS: "700"
 
-      # Point Spring to the Docker-network Redis/Postgres
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_DATA_REDIS_PORT: "6379"
-      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # Point Spring to the Docker-network Redis/Postgres
+    SPRING_DATA_REDIS_HOST: redis
+    SPRING_DATA_REDIS_PORT: "6379"
+    SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
 
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/prod_db
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+    SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/prod_db
+    SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+    SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
 
-    ports:
-      - "8080:8080"
-    networks:
-      - mynetwork
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
+  ports:
+    - "8080:8080"
+  networks:
+    - mynetwork
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
 
-    # Give the app lots of file descriptors & sockets
-    ulimits:
-      nofile:
-        soft: 200000
-        hard: 200000
-      nproc: 131072
+  # Give the app lots of file descriptors & sockets
+  ulimits:
+    nofile:
+      soft: 200000
+      hard: 200000
+    nproc: 131072
 
-    # Kernel socket/backlog & ephemeral ports (applies to this container’s netns)
-    sysctls:
-      net.core.somaxconn: "65535"
-      net.ipv4.ip_local_port_range: "10000 65535"
-      net.ipv4.tcp_tw_reuse: "1"
+  # Kernel socket/backlog & ephemeral ports (applies to this container’s netns)
+  sysctls:
+    net.core.somaxconn: "65535"
+    net.ipv4.ip_local_port_range: "10000 65535"
+    net.ipv4.tcp_tw_reuse: "1"
 
-    # Basic healthcheck
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+  # Basic healthcheck
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
 
   redis:
     image: redis:7-alpine
@@ -114,16 +114,15 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
-
   postgres:
-    image: postgres:15-alpine
+    image: 'postgres:15-alpine'
     env_file:
       - .env
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /data/postgres
       POSTGRES_DB: prod_db
-      PGDATA: /var/lib/postgresql/data
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -131,11 +130,12 @@ services:
     networks:
       - mynetwork
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER}" ]
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
     restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
