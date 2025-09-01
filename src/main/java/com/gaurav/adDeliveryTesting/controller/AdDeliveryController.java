@@ -52,13 +52,13 @@ public class AdDeliveryController {
 
     @GetMapping("/test")
     public ResponseEntity<String> tester() {
-       return new ResponseEntity<>("Hello World",HttpStatus.OK);
+        return new ResponseEntity<>("Hello World",HttpStatus.OK);
     }
 
     @GetMapping("/serveByParams")
     public ResponseEntity<?> serveByParams(@RequestParam("country") String countryDate, @RequestParam("language") String languageDate,
                                            @RequestParam("os") String osDate,@RequestParam("browser") String browserDate
-                                           ) {
+    ) {
         String country  = trimToNull(countryDate);
         String language = trimToNull(languageDate);
         String os       = trimToNull(osDate);
