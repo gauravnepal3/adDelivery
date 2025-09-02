@@ -41,16 +41,9 @@ public class AdDeliveryController {
         // Remove this:
         // log.warn("Country:"+country+" Language:"+language+" OS:"+os+" Browser:"+browser);
 
-        var served = service.serveAd(country, language, os, browser);
-        if (served.isEmpty()) return ResponseEntity.noContent().build();
-
-        var c = served.get();
-        return ResponseEntity.ok(new ServeResponseDTO(
-                c.getCampaignId(),
-                c.getDeliveryLink(),
-                c.getBiddingRate(),
-                c.getRemainingBudget()
-        ));
+        return service.serveAd(country, language, os, browser)
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @GetMapping("/test")
@@ -67,16 +60,9 @@ public class AdDeliveryController {
         String os       = osDate;
         String browser  = browserDate;
 
-        var served = service.serveAd(country, language, os, browser);
-        if (served.isEmpty()) return ResponseEntity.noContent().build();
-
-        var c = served.get();
-        return ResponseEntity.ok(new ServeResponseDTO(
-                c.getCampaignId(),
-                c.getDeliveryLink(),
-                c.getBiddingRate(),
-                c.getRemainingBudget()
-        ));
+        return service.serveAd(country, language, os, browser)
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
 }

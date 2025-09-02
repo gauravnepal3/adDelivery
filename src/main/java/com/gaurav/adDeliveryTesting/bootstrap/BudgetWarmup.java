@@ -1,7 +1,9 @@
 package com.gaurav.adDeliveryTesting.bootstrap;
 
 import com.gaurav.adDeliveryTesting.model.Campaign;
+import com.gaurav.adDeliveryTesting.model.CampaignFilters;
 import com.gaurav.adDeliveryTesting.repo.AdDeliveryRepo;
+import com.gaurav.adDeliveryTesting.service.CampaignCacheService;
 import com.gaurav.adDeliveryTesting.service.CampaignMetadataCache;
 import com.gaurav.adDeliveryTesting.utils.MoneyUtils;
 import org.redisson.api.RedissonClient;
@@ -22,6 +24,9 @@ public class BudgetWarmup {
 
     @Autowired
     private CampaignMetadataCache meta;
+
+    @Autowired
+    private CampaignCacheService cacheService;
     public BudgetWarmup(AdDeliveryRepo repo, RedissonClient redisson) {
         this.repo = repo; this.redisson = redisson;
     }
@@ -31,6 +36,17 @@ public class BudgetWarmup {
         var codec = StringCodec.INSTANCE;
         int count = 0;
         for (Campaign c : repo.findAll()) {
+
+            // inside your existing BudgetWarmup loop
+            CampaignFilters cf = c.getFilters();
+            if (cf != null) {
+                for (String ctry : cf.getCountries())
+                    for (String lang : cf.getLanguages())
+                        for (String os : cf.getOsList())
+                            for (String br : cf.getBrowsers()) {
+                                cacheService.addCampaign(c, ctry, lang, os, br);
+                            }
+            }
             long remCents = MoneyUtils.toCents(c.getRemainingBudget());
             String id = String.valueOf(c.getCampaignId());
             redisson.getMap("campaign:budget:" + id, codec).fastPut("remaining", Long.toString(remCents));
