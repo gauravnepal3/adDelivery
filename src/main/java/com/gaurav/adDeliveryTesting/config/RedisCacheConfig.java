@@ -35,18 +35,18 @@ public class RedisCacheConfig {
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient(RedisProperties props) {
         Config cfg = new Config();
-        cfg.setThreads(32);        // adjust to ~1–2x cores
-        cfg.setNettyThreads(64);
+        cfg.setThreads(54);        // adjust to ~1–2x cores
+        cfg.setNettyThreads(96);
 
         var single = cfg.useSingleServer()
                 .setAddress((props.getSsl().isEnabled() ? "rediss://" : "redis://") + props.getHost() + ":" + props.getPort())
                 .setPassword((props.getPassword() != null && !props.getPassword().isBlank()) ? props.getPassword() : null)
-                .setConnectionPoolSize(4000)            // bigger pool to avoid "Unable to acquire connection"
+                .setConnectionPoolSize(3000)            // bigger pool to avoid "Unable to acquire connection"
                 .setConnectionMinimumIdleSize(256)
-                .setSubscriptionConnectionPoolSize(256)
+                .setSubscriptionConnectionPoolSize(128)
                 .setIdleConnectionTimeout(8000)
                 .setConnectTimeout(600)
-                .setTimeout(600)                        // hard cap latency
+                .setTimeout(700)                        // hard cap latency
                 .setRetryAttempts(1)
                 .setRetryInterval(100)
                 .setPingConnectionInterval(0);          // reduce chatter
