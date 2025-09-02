@@ -62,11 +62,7 @@ public class AdDeliveryController {
                                            @RequestParam String language,
                                            @RequestParam String os,
                                            @RequestParam String browser) {
-        String c  = trimToNull(country);
-        String l  = trimToNull(language);
-        String o  = trimToNull(os);
-        String b  = trimToNull(browser);
-        return service.serveAd(c, l, o, b)
+        return service.serveAd(country, language, os, browser)
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
