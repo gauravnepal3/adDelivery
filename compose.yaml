@@ -11,7 +11,7 @@ services:
         -XX:MaxGCPauseMillis=50
         -XX:+AlwaysPreTouch
         -XX:+PerfDisableSharedMem
-        -Xms12g -Xmx12g
+        -Xms2g -Xmx2g
         -XX:ActiveProcessorCount=32
     ports:
       - "8080:8080"
@@ -37,11 +37,11 @@ services:
       - redis-server
       - --save ""
       - --appendonly no
-      - --tcp-backlog 65535
+      - --tcp-backlog 511
       - --timeout 0
       - --tcp-keepalive 60
       - --requirepass ${REDIS_PASSWORD}
-      - --maxclients 100000
+      - --maxclients 20000
     ports:
       - "6379:6379"
     networks:
