@@ -60,7 +60,7 @@ public class AdDeliveryService implements Serializable {
         List<CampaignFilters> filters = filterRepo.findAll();
 
         List<Campaign> matching = filters.stream()
-                .filter(f -> (country == null || f.getCountries().contains(country)))
+//                .filter(f -> (country == null || f.getCountries().contains(country)))
                 .filter(f -> (language == null || f.getLanguages().contains(language)))
                 .filter(f -> (os == null || f.getOsList().contains(os)))
                 .filter(f -> (browser == null || f.getBrowsers().contains(browser)))
