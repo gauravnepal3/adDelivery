@@ -1,5 +1,6 @@
 package com.gaurav.adDeliveryTesting.controller;
 
+import com.gaurav.adDeliveryTesting.bootstrap.BudgetWarmup;
 import com.gaurav.adDeliveryTesting.model.Campaign;
 import com.gaurav.adDeliveryTesting.responseDto.ServeResponseDTO;
 import com.gaurav.adDeliveryTesting.service.AdDeliveryService;
@@ -65,6 +66,14 @@ public class AdDeliveryController {
         return service.serveAd(country, language, os, browser)
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    @RestController @RequestMapping("/admin")
+    public class AdminWarmController {
+        private final BudgetWarmup warmup;
+        public AdminWarmController(BudgetWarmup warmup){ this.warmup = warmup; }
+
+        @PostMapping("/warm") public String warm() { warmup.warm(); return "ok"; }
     }
 
 }

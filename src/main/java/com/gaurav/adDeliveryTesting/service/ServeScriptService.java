@@ -23,48 +23,50 @@ public class ServeScriptService {
     public record ServeResult(int code, Integer id, Long newRemainingCents) {}
 
     private static final String SERVE_LUA = """
-        -- KEYS[1] = zset key: campaign:filters:{os}:{browser}:{lang}:{country}
-        -- KEYS[2] = touched set key: campaign:touched
-        -- ARGV[1] = budgetKeyPrefix, e.g., "campaign:budget:"
-        -- ARGV[2] = deltaKeyPrefix,  e.g., "campaign:delta:"
+-- KEYS[1] = zset key: campaign:filters:{os}:{browser}:{lang}:{country}
+-- KEYS[2] = touched set key: campaign:touched
+-- KEYS[3] = round-robin key for this filter (string key), e.g. rr:{os}:{browser}:{lang}:{country}
+-- ARGV[1] = budgetKeyPrefix, e.g., "campaign:budget:"
+-- ARGV[2] = deltaKeyPrefix,  e.g., "campaign:delta:"
 
-        -- Get top score (highest bid)
-        local top = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
-        if (not top) or (#top == 0) then return {0} end
-        local topScore = tonumber(top[2])
-        if (not topScore) then return {0} end
+-- 1) Find top score (highest bid)
+local top = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+if (not top) or (#top == 0) then return {0} end
+local topScore = tonumber(top[2])
+if (not topScore) then return {0} end
 
-        -- Collect all ties at that score
-        local ties = redis.call('ZRANGEBYSCORE', KEYS[1], topScore, topScore)
-        if (not ties) or (#ties == 0) then return {0} end
+-- 2) Gather all ties at that score
+local ties = redis.call('ZRANGEBYSCORE', KEYS[1], topScore, topScore)
+if (not ties) or (#ties == 0) then return {0} end
 
-        -- Pick random among ties
-        local t = redis.call('TIME')
-        local seed = tonumber(t[1]) * 1000000 + tonumber(t[2])
-        math.randomseed(seed)
-        local idx = math.random(#ties)
-        local id = ties[idx]
+-- 3) Round-robin among ties (deterministic, cheap)
+local rr = redis.call('INCR', KEYS[3])
+local idx = ((rr - 1) % #ties) + 1
+local id = ties[idx]
 
-        -- Spend 'bid' equal to the ZSET score (in integer cents)
-        local bid = topScore
+-- 4) Spend using HINCRBY (optimistic)
+local budgetKey = ARGV[1] .. id
+local deltaKey  = ARGV[2] .. id
 
-        local budgetKey = ARGV[1] .. id      -- campaign:budget:{id}
-        local deltaKey  = ARGV[2] .. id      -- campaign:delta:{id}
+local newRem = redis.call('HINCRBY', budgetKey, 'remaining', -topScore)
+if (not newRem) then
+  -- field/key missing → revert to previous state
+  return {0, id, nil}
+end
 
-        local rem = redis.call('HGET', budgetKey, 'remaining')
-        if not rem then return {0, id, nil} end
+if newRem < 0 then
+  -- not enough budget: revert and report no-spend
+  redis.call('HINCRBY', budgetKey, 'remaining', topScore)
+  return {0, id, newRem + topScore}
+end
 
-        local remNum = tonumber(rem)
-        if remNum < bid then return {0, id, rem} end
+-- 5) Record delta and touch set
+redis.call('INCRBY', deltaKey, topScore)
+redis.call('SADD', KEYS[2], id)
 
-        local newRem = remNum - bid
-        redis.call('HSET', budgetKey, 'remaining', tostring(newRem))
-        redis.call('INCRBY', deltaKey, bid)
-        redis.call('SADD', KEYS[2], id)
-
-        if newRem <= 0 then return {2, id, '0'} end
-        return {1, id, tostring(newRem)}
-    """;
+if newRem <= 0 then return {2, id, 0} end
+return {1, id, newRem}
+""";
 
     /** Executes pick+spend in ONE RTT. */
     public ServeResult pickAndSpend(String country, String language, String os, String browser) {
