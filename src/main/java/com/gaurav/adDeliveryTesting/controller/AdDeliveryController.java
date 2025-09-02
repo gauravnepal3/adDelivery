@@ -51,16 +51,22 @@ public class AdDeliveryController {
         return new ResponseEntity<>("Hello World",HttpStatus.OK);
     }
 
-    @GetMapping("/serveByParams")
-    public ResponseEntity<?> serveByParams(@RequestParam("country") String countryDate, @RequestParam("language") String languageDate,
-                                           @RequestParam("os") String osDate,@RequestParam("browser") String browserDate
-    ) {
-        String country  = countryDate;
-        String language = languageDate;
-        String os       = osDate;
-        String browser  = browserDate;
+    private static String trimToNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
 
-        return service.serveAd(country, language, os, browser)
+    @GetMapping("/serveByParams")
+    public ResponseEntity<?> serveByParams(@RequestParam String country,
+                                           @RequestParam String language,
+                                           @RequestParam String os,
+                                           @RequestParam String browser) {
+        String c  = trimToNull(country);
+        String l  = trimToNull(language);
+        String o  = trimToNull(os);
+        String b  = trimToNull(browser);
+        return service.serveAd(c, l, o, b)
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
