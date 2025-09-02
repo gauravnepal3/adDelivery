@@ -15,6 +15,16 @@ public interface AdDeliveryRepo extends JpaRepository<Campaign,Integer> {
     @Query("select c from Campaign c where c.campaignId = :id")
     Optional<Campaign> findByIdForUpdate(@Param("id") Integer id);
 
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {
+            "filters",
+            "filters.countries",
+            "filters.languages",
+            "filters.osList",
+            "filters.browsers"
+    })
+    @Query("select c from Campaign c")
+    List<Campaign> findAllWithFilters();
+
     @Query("select c.campaignId from Campaign c")
     List<Integer> findAllIds();
 }

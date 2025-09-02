@@ -34,7 +34,7 @@ public class BudgetWarmup {
         var codec = org.redisson.client.codec.StringCodec.INSTANCE;
         int count = 0;
 
-        for (Campaign c : repo.findAll()) {
+        for (Campaign c : repo.findAllWithFilters()) {
             // budgets
             long remCents = com.gaurav.adDeliveryTesting.utils.MoneyUtils.toCents(c.getRemainingBudget());
             String id = String.valueOf(c.getCampaignId());
