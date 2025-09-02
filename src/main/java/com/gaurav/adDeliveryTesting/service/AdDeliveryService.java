@@ -37,46 +37,20 @@ public class AdDeliveryService implements Serializable {
     @Autowired private ServeScriptService serveScript;
 
     public Optional<ServeResponseDTO> serveAdFast(String country, String language, String os, String browser) {
-        // One RTT: pick + spend + touch
         var r = serveScript.pickAndSpend(country, language, os, browser);
+        if (r.code == 0 || r.campaignId == null) return Optional.empty();
 
-        if (r.code() == 0 || r.id() == null) {
-            // OPTIONAL: if budgets weren't warmed for this id, init once and retry quickly
-            // (kept off by default; uncomment if you see warmup races)
-            // if (r.id() != null) {
-            //     var v = meta.get(r.id());
-            //     if (v != null) {
-            //         var codec = org.redisson.client.codec.StringCodec.INSTANCE;
-            //         redisson.getMap("campaign:budget:" + r.id(), codec)
-            //                 .fastPut("remaining", Long.toString(v.remainingCents()));
-            //         r = serveScript.pickAndSpend(country, language, os, browser);
-            //         if (r.code() == 0 || r.id() == null) return Optional.empty();
-            //     } else {
-            //         cacheService.removeCampaignEverywhere(r.id());
-            //     }
-            // }
-            return Optional.empty();
-        }
+        var v = meta.get(r.campaignId);
+        if (v == null) return Optional.empty();
 
-        // If exhausted, remove from all zsets
-        if (r.code() == 2) {
-            cacheService.removeCampaignEverywhere(r.id());
-        }
-
-        var v = meta.get(r.id());
-        if (v == null) {
-            cacheService.removeCampaignEverywhere(r.id());
-            return Optional.empty();
-        }
-
-        // Build tiny DTO (no JPA, no Map.of)
+        // If you want, use r.newRemaining to display a more-up-to-date remaining; otherwise use cache snapshot
         return Optional.of(new ServeResponseDTO(
                 v.campaignId(),
                 v.deliveryLink(),
-                MoneyUtils.fromCents(v.bidCents()),
-                r.newRemainingCents() != null
-                        ? MoneyUtils.fromCents(Math.max(0, r.newRemainingCents()))
-                        : MoneyUtils.fromCents(Math.max(0, v.remainingCents() - v.bidCents()))
+                com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(v.bidCents()),
+                (r.newRemaining != null)
+                        ? com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(Math.max(r.newRemaining, 0))
+                        : com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(v.remainingCents() - v.bidCents())
         ));
     }
     // Keep your cacheable list endpoint as-is; it's not hot path
