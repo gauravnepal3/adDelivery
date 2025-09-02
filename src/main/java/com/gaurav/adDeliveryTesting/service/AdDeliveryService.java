@@ -30,7 +30,7 @@ public class AdDeliveryService implements Serializable {
     @Autowired private RedissonClient redisson;
     @Autowired private CampaignMetadataCache meta;
     @Autowired private BudgetCounterService budgetCounterService;
-
+    @Autowired private AdDeliveryFallbackService fallback;
     @Value("${adserve.dbFallbackEnabled:true}")
     private boolean dbFallbackEnabled;
 
@@ -89,8 +89,8 @@ public class AdDeliveryService implements Serializable {
     public Optional<ServeResponseDTO> serveAd(String country, String language, String os, String browser) {
         var fast = serveAdFast(country, language, os, browser);
         if (fast.isPresent()) return fast;
-        if (!dbFallbackEnabled) return Optional.empty();    // hard stop: no DB in perf runs
-        return serveAdFallback(country, language, os, browser); // optional slow path
+        if (!dbFallbackEnabled) return Optional.empty();
+        return fallback.serveAdFallback(country, language, os, browser);
     }
 
     // ---------- OPTIONAL SLOW PATH (ONLY when flag enabled) ----------
