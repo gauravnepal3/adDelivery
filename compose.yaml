@@ -51,8 +51,6 @@ services:
       nofile:
         soft: 200000
         hard: 200000
-    sysctls:
-      net.core.somaxconn: "65535"
     healthcheck:
       test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
       interval: 10s
