@@ -26,6 +26,8 @@ public class AdDeliveryController {
     @Autowired
     private UserAgentParser parser;
 
+    @Autowired private  BudgetWarmup warmup;
+
     @GetMapping("/campaigns")
     public ResponseEntity<List<Campaign>> getCampaign(){
         return new ResponseEntity<>(service.getCampaign(), HttpStatus.OK);
@@ -68,12 +70,9 @@ public class AdDeliveryController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
-    @RestController @RequestMapping("/admin")
-    public class AdminWarmController {
-        private final BudgetWarmup warmup;
-        public AdminWarmController(BudgetWarmup warmup){ this.warmup = warmup; }
+
 
         @PostMapping("/warm") public String warm() { warmup.warm(); return "ok"; }
-    }
+
 
 }
