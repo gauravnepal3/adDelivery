@@ -68,26 +68,36 @@ if newRem <= 0 then return {2, id, 0} end
 return {1, id, newRem}
 """;
 
-    /** Executes pick+spend in ONE RTT. */
     public ServeResult pickAndSpend(String country, String language, String os, String browser) {
         String zsetKey = cache.debugFilterKey(country, language, os, browser);
+        String rrKey   = "campaign:rr:" + (os == null ? "any" : os)
+                + ":" + (browser == null ? "any" : browser)
+                + ":" + (language == null ? "any" : language)
+                + ":" + (country == null ? "any" : country);
+
+        // Defensive: ensure none of the KEYS are null
+        if (zsetKey == null || rrKey == null) {
+            return new ServeResult(0, null, null);
+        }
+
         @SuppressWarnings("unchecked")
         List<Object> res = (List<Object>) redisson.getScript(StringCodec.INSTANCE).eval(
                 RScript.Mode.READ_WRITE,
                 SERVE_LUA,
                 RScript.ReturnType.MULTI,
-                Arrays.asList(zsetKey, "campaign:touched"),
+                // >>> THREE KEYS here <<<
+                java.util.Arrays.asList(zsetKey, "campaign:touched", rrKey),
+                // ARGV
                 "campaign:budget:",
                 "campaign:delta:"
         );
 
         if (res == null || res.isEmpty()) return new ServeResult(0, null, null);
-        int code = toInt(res.get(0));
+        int code = (res.get(0) instanceof Number n) ? n.intValue() : Integer.parseInt(res.get(0).toString());
         Integer id = (res.size() > 1 && res.get(1) != null) ? Integer.valueOf(res.get(1).toString()) : null;
         Long newRem = (res.size() > 2 && res.get(2) != null) ? Long.valueOf(res.get(2).toString()) : null;
         return new ServeResult(code, id, newRem);
     }
-
     private static int toInt(Object o) {
         if (o == null) return 0;
         return (o instanceof Number n) ? n.intValue() : Integer.parseInt(o.toString());

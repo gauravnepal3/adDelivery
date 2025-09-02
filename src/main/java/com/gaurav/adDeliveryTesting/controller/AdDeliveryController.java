@@ -72,7 +72,10 @@ public class AdDeliveryController {
 
 
 
-        @PostMapping("/warm") public String warm() { warmup.warm(); return "ok"; }
+        @PostMapping("/warm")
+        public String warm() {
+        warmup.warm();
+        return "ok"; }
 
 
 }
