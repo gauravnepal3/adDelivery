@@ -11,8 +11,8 @@ services:
         -XX:MaxGCPauseMillis=50
         -XX:+AlwaysPreTouch
         -XX:+PerfDisableSharedMem
-        -Xms2g -Xmx2g
-        -XX:ActiveProcessorCount=10
+        -Xms8g -Xmx8g
+        -XX:ActiveProcessorCount=32
     ports:
       - "8080:8080"
     networks:
