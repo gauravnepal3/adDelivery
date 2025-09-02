@@ -67,15 +67,16 @@ public class AdDeliveryController {
         String os       = osDate;
         String browser  = browserDate;
 
-        log.warn("Country:"+country+" Language:"+language+" OS:"+os+" Browser:"+browser);
-        return service.serveAd(country, language, os, browser)
-                .<ResponseEntity<?>>map(c -> ResponseEntity.ok(Map.of(
-                        "campaignId", c.getCampaignId(),
-                        "deliveryLink", c.getDeliveryLink(),
-                        "biddingRate", c.getBiddingRate(),
-                        "remainingBudget", c.getRemainingBudget()
-                )))
-                .orElseGet(() -> ResponseEntity.noContent().build());
+        var served = service.serveAd(country, language, os, browser);
+        if (served.isEmpty()) return ResponseEntity.noContent().build();
+
+        var c = served.get();
+        return ResponseEntity.ok(new ServeResponseDTO(
+                c.getCampaignId(),
+                c.getDeliveryLink(),
+                c.getBiddingRate(),
+                c.getRemainingBudget()
+        ));
     }
 
 }
