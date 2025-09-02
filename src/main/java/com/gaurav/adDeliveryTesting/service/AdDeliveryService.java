@@ -4,7 +4,6 @@ import com.gaurav.adDeliveryTesting.model.Campaign;
 import com.gaurav.adDeliveryTesting.model.CampaignFilters;
 import com.gaurav.adDeliveryTesting.repo.AdDeliveryRepo;
 import com.gaurav.adDeliveryTesting.repo.CampaignFilterRepo;
-import com.gaurav.adDeliveryTesting.utils.MoneyUtils;
 import com.gaurav.adDeliveryTesting.utils.UserAgentParser;
 import jakarta.transaction.Transactional;
 import org.redisson.api.RedissonClient;
@@ -14,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
@@ -36,6 +34,9 @@ public class AdDeliveryService implements Serializable {
 
     @Autowired
     private RedissonClient redisson;
+
+    @Autowired
+    private CampaignMetadataCache meta;
 
     @Autowired private BudgetCounterService budgetCounterService;
 
@@ -108,43 +109,47 @@ public class AdDeliveryService implements Serializable {
 
     private Optional<Campaign> tryServeCounter(Integer campaignId,
                                                String country, String language, String os, String browser) {
-        var codec = org.redisson.client.codec.StringCodec.INSTANCE;
 
-        Optional<Campaign> cOpt = repo.findById(campaignId);
-        if (cOpt.isEmpty()) {
+        var cView = meta.get(campaignId);
+        if (cView == null) {
             cacheService.removeCampaignEverywhere(campaignId);
             return Optional.empty();
         }
-        Campaign c = cOpt.get();
-        long bidCents = MoneyUtils.toCents(c.getBiddingRate());
 
-        // First attempt to spend
+        long bidCents = cView.bidCents();
         int rc = budgetCounterService.trySpendCents(campaignId, bidCents);
 
-        // If not enough, check if budget
         if (rc == 0) {
+            // If budget hash missing, reconstruct once from metadata cache snapshot
+            var codec = org.redisson.client.codec.StringCodec.INSTANCE;
             var map = redisson.getMap("campaign:budget:" + campaignId, codec);
-            String remStr = (String) map.get("remaining");
-            if (remStr == null) {
-                long remCents = MoneyUtils.toCents(c.getRemainingBudget());
-                map.fastPut("remaining", Long.toString(remCents));
-                rc = budgetCounterService.trySpendCents(c.getCampaignId(), bidCents);
+            if (map.get("remaining") == null) {
+                map.fastPut("remaining", Long.toString(cView.remainingCents()));
+                rc = budgetCounterService.trySpendCents(campaignId, bidCents);
             }
             if (rc == 0) {
-
-                if (c.getRemainingBudget().compareTo(c.getBiddingRate()) < 0) {
-                    cacheService.removeCampaignEverywhere(c.getCampaignId());
-                }
+                cacheService.removeCampaignEverywhere(campaignId);
+                meta.invalidate(campaignId);
                 return Optional.empty();
             }
         }
 
-
         if (rc == 2) {
-            cacheService.removeCampaignEverywhere(c.getCampaignId());
+            cacheService.removeCampaignEverywhere(campaignId);
+            meta.invalidate(campaignId);
         }
 
-        cacheService.updateCampaignBudget(c, country, language, os, browser);
-        return Optional.of(c);
+        // DO NOT touch ZSETs here (no-op)
+        // Return a lightweight Campaign-like response without hitting JPA
+        // Option A: convert cView into a lightweight response DTO (preferred)
+        return Optional.of(new Campaign(
+                cView.campaignId(),
+                cView.deliveryLink(),
+                null, // totalBudget not needed here
+                // “remainingBudget” shown to caller is not exact; if needed, derive:
+                com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(cView.remainingCents() - cView.bidCents()),
+                com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(cView.bidCents()),
+                null // filters not needed for response
+        ));
     }
 }

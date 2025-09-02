@@ -2,11 +2,13 @@ package com.gaurav.adDeliveryTesting.bootstrap;
 
 import com.gaurav.adDeliveryTesting.model.Campaign;
 import com.gaurav.adDeliveryTesting.repo.AdDeliveryRepo;
+import com.gaurav.adDeliveryTesting.service.CampaignMetadataCache;
 import com.gaurav.adDeliveryTesting.utils.MoneyUtils;
 import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,8 @@ public class BudgetWarmup {
     private final AdDeliveryRepo repo;
     private final RedissonClient redisson;
 
+    @Autowired
+    private CampaignMetadataCache meta;
     public BudgetWarmup(AdDeliveryRepo repo, RedissonClient redisson) {
         this.repo = repo; this.redisson = redisson;
     }
@@ -34,5 +38,6 @@ public class BudgetWarmup {
             count++;
         }
         log.info("BudgetWarmup initialized {} campaigns in Redis", count);
+        meta.warmAll(repo.findAll());
     }
 }

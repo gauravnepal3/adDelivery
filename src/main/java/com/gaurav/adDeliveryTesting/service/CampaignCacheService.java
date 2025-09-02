@@ -33,10 +33,6 @@ public class CampaignCacheService {
         this.redisson = redisson;
     }
 
-    // =======================
-    // Key builders / utilities
-    // =======================
-
     private String filterKey(String country, String language, String os, String browser) {
         return String.format("campaign:filters:%s:%s:%s:%s",
                 (os == null ? "any" : os),
@@ -69,10 +65,6 @@ public class CampaignCacheService {
     // Write operations
     // =======================
 
-    /**
-     * Add (or refresh) this campaign in the ZSET for a specific (country, language, os, browser) combo,
-     * and track the ZSET key for later removal.
-     */
     public void addCampaign(Campaign campaign, String country, String language, String os, String browser) {
         String key = filterKey(country, language, os, browser);
         String member = String.valueOf(campaign.getCampaignId());

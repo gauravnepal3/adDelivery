@@ -1,6 +1,8 @@
 package com.gaurav.adDeliveryTesting.responseDto;
 
-public class CampaignResponseDto {
-    private String link;
-    private String id;
+public record CampaignResponseDto(
+    int campaignId,
+    String deliveryLink,
+    long bidCents,
+    long remainingCents){
 }

@@ -1,12 +1,11 @@
 package com.gaurav.adDeliveryTesting.controller;
 
 import com.gaurav.adDeliveryTesting.model.Campaign;
-import com.gaurav.adDeliveryTesting.responseDto.CampaignResponseDto;
+import com.gaurav.adDeliveryTesting.responseDto.ServeResponseDTO;
 import com.gaurav.adDeliveryTesting.service.AdDeliveryService;
 import com.gaurav.adDeliveryTesting.utils.UserAgentParser;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.coyote.Response;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,21 +32,25 @@ public class AdDeliveryController {
 
     @GetMapping("/serve")
     public ResponseEntity<?> serveAd(HttpServletRequest request) {
-        String country  = trimToNull(request.getHeader("X-Country"));
-        String language = trimToNull(parser.parseLanguage(request.getHeader("Accept-Language")));
-        String ua       = request.getHeader("User-Agent");
-        String os       = trimToNull(parser.parseOS(ua));
-        String browser  = trimToNull(parser.parseBrowser(ua));
+        final String country  = request.getHeader("X-Country");
+        final String language = parser.parseLanguage(request.getHeader("Accept-Language"));
+        final String ua       = request.getHeader("User-Agent");
+        final String os       = parser.parseOS(ua);
+        final String browser  = parser.parseBrowser(ua);
 
-        log.warn("Country:"+country+" Language:"+language+" OS:"+os+" Browser:"+browser);
-        return service.serveAd(country, language, os, browser)
-                .<ResponseEntity<?>>map(c -> ResponseEntity.ok(Map.of(
-                        "campaignId", c.getCampaignId(),
-                        "deliveryLink", c.getDeliveryLink(),
-                        "biddingRate", c.getBiddingRate(),
-                        "remainingBudget", c.getRemainingBudget()
-                )))
-                .orElseGet(() -> ResponseEntity.noContent().build());
+        // Remove this:
+        // log.warn("Country:"+country+" Language:"+language+" OS:"+os+" Browser:"+browser);
+
+        var served = service.serveAd(country, language, os, browser);
+        if (served.isEmpty()) return ResponseEntity.noContent().build();
+
+        var c = served.get();
+        return ResponseEntity.ok(new ServeResponseDTO(
+                c.getCampaignId(),
+                c.getDeliveryLink(),
+                c.getBiddingRate(),
+                c.getRemainingBudget()
+        ));
     }
 
     @GetMapping("/test")
@@ -59,10 +62,10 @@ public class AdDeliveryController {
     public ResponseEntity<?> serveByParams(@RequestParam("country") String countryDate, @RequestParam("language") String languageDate,
                                            @RequestParam("os") String osDate,@RequestParam("browser") String browserDate
     ) {
-        String country  = trimToNull(countryDate);
-        String language = trimToNull(languageDate);
-        String os       = trimToNull(osDate);
-        String browser  = trimToNull(browserDate);
+        String country  = countryDate;
+        String language = languageDate;
+        String os       = osDate;
+        String browser  = browserDate;
 
         log.warn("Country:"+country+" Language:"+language+" OS:"+os+" Browser:"+browser);
         return service.serveAd(country, language, os, browser)
@@ -75,9 +78,4 @@ public class AdDeliveryController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
-    private static String trimToNull(String s) {
-        if (s == null) return null;
-        String t = s.trim();
-        return t.isEmpty() ? null : t;
-    }
 }
