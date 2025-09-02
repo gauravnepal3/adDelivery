@@ -11,22 +11,23 @@ services:
         -XX:MaxGCPauseMillis=50
         -XX:+AlwaysPreTouch
         -XX:+PerfDisableSharedMem
-        -Xms2g -Xmx2g
-        -XX:ActiveProcessorCount=0
+        -Xms8g -Xmx8g
+        -XX:ActiveProcessorCount=32
     ports:
-      - "8080:8080"   # NOTE: with host networking this is not needed
+      - "8080:8080"
+    network_mode: host
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # (optional) simple healthcheck so depends_on works reliably
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
       interval: 10s
       timeout: 5s
       retries: 10
-    network_mode: host   # ✅ use host network, bypass Docker bridge
 
   redis:
     image: redis:7-alpine
@@ -42,18 +43,26 @@ services:
       - --maxclients 50000
       - --io-threads 4
       - --io-threads-do-reads yes
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
+      - --hz 10
+    ports:
+      - "6379:6379"
+    network_mode: host
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
+    sysctls:
+      net.core.somaxconn: "65535"
     healthcheck:
       test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
-    network_mode: host   # ✅ host networking
-
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
   postgres:
-    image: postgres:15-alpine
+    image: 'postgres:15-alpine'
     env_file:
       - .env
     environment:
@@ -63,13 +72,15 @@ services:
       POSTGRES_DB: prod_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    network_mode: host
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    network_mode: host   # ✅ host networking
+    restart: unless-stopped
 
 volumes:
   postgres_data:
