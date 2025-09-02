@@ -1,38 +1,34 @@
 services:
   java-app:
     build: .
-    env_file:
-      - .env
     environment:
-      - SPRING_PROFILES_ACTIVE=docker
-      - SERVER_PORT=8080
-      - JAVA_TOOL_OPTIONS=
-        -XX:+UseG1GC
-        -XX:MaxGCPauseMillis=50
-        -XX:+AlwaysPreTouch
-        -XX:+PerfDisableSharedMem
-        -Xms8g -Xmx8g
-        -XX:ActiveProcessorCount=32
-    ports:
-      - "8080:8080"
-    networks:
-      - mynetwork
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: "8080"                      # app listens on 8080
+      # point Spring to localhost (host network)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/prod_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_DRIVERCLASSNAME: org.postgresql.Driver
+      SPRING_DATA_REDIS_HOST: localhost
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # optional: avoid dialect auto-detection on first boot
+      SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     restart: unless-stopped
-    # (optional) simple healthcheck so depends_on works reliably
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
       interval: 10s
       timeout: 5s
       retries: 10
+    network_mode: host
 
   redis:
     image: redis:7-alpine
-    container_name: redis
     command:
       - redis-server
       - --save ""
@@ -44,52 +40,30 @@ services:
       - --maxclients 50000
       - --io-threads 4
       - --io-threads-do-reads yes
-      - --hz 10
-    ports:
-      - "6379:6379"
-    networks:
-      - mynetwork
-    ulimits:
-      nofile:
-        soft: 200000
-        hard: 200000
-    sysctls:
-      net.core.somaxconn: "65535"
+    restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
+    network_mode: host
+
   postgres:
-    image: 'postgres:15-alpine'
-    env_file:
-      - .env
+    image: postgres:15-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      PGDATA: /data/postgres
       POSTGRES_DB: prod_db
+      PGDATA: /data/postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks:
-      - mynetwork
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
+    network_mode: host
 
 volumes:
   postgres_data:
-  redis_data:
-  letsencrypt:
-
-networks:
-  mynetwork:
-    driver: bridge
