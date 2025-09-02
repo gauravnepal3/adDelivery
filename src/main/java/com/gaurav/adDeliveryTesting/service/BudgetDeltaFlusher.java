@@ -11,6 +11,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.sql.DataSource;
+import java.math.BigDecimal;
+import java.sql.PreparedStatement;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 @Component
 public class BudgetDeltaFlusher {
@@ -53,10 +58,32 @@ public class BudgetDeltaFlusher {
         }
 
         if (!batch.isEmpty()) {
-            jdbc.batchUpdate(
-                    "UPDATE campaign SET remaining_budget = remaining_budget - ? WHERE campaign_id = ?",
-                    batch
-            );
+            // Break into chunks of, say, 2000 rows
+            int chunkSize = 2000;
+            for (int i = 0; i < batch.size(); i += chunkSize) {
+                List<Object[]> sub = batch.subList(i, Math.min(i + chunkSize, batch.size()));
+
+                String placeholders = IntStream.range(0, sub.size())
+                        .mapToObj(j -> "(?,?)")
+                        .collect(Collectors.joining(","));
+
+                String sql = """
+            UPDATE campaign c
+            SET remaining_budget = c.remaining_budget - v.delta
+            FROM (VALUES %s) AS v(id, delta)
+            WHERE c.campaign_id = v.id
+        """.formatted(placeholders);
+
+                jdbc.update(con -> {
+                    PreparedStatement ps = con.prepareStatement(sql);
+                    int idx = 1;
+                    for (Object[] row : sub) {
+                        ps.setInt(idx++, (Integer) row[1]);           // id
+                        ps.setBigDecimal(idx++, (BigDecimal) row[0]); // delta
+                    }
+                    return ps;
+                });
+            }
         }
     }
 }
