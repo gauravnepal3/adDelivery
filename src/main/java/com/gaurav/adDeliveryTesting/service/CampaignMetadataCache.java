@@ -16,7 +16,7 @@ public class CampaignMetadataCache {
     private final AdDeliveryRepo repo;
 
     private final LoadingCache<Integer, CampaignResponseDto> cache = Caffeine.newBuilder()
-            .maximumSize(200_000)                   // adjust to cardinality
+            .maximumSize(1_000_000)                   // adjust to cardinality
             .expireAfterWrite(Duration.ofMinutes(10))
             .recordStats()
             .build(this::loadOne);
