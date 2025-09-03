@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
-
 @Service
 public class AdDeliveryService {
 
@@ -16,6 +15,7 @@ public class AdDeliveryService {
     private final CampaignMetadataCache meta;
     private final ServeScriptService serveScript;
     private final AdDeliveryFallbackService fallback;
+    private final LazyIndexer indexer;
 
     @Value("${adserve.dbFallbackEnabled:true}")
     private boolean dbFallbackEnabled;
@@ -23,11 +23,13 @@ public class AdDeliveryService {
     public AdDeliveryService(AdDeliveryRepo repo,
                              CampaignMetadataCache meta,
                              ServeScriptService serveScript,
-                             AdDeliveryFallbackService fallback) {
+                             AdDeliveryFallbackService fallback,
+                             LazyIndexer indexer) {
         this.repo = repo;
         this.meta = meta;
         this.serveScript = serveScript;
         this.fallback = fallback;
+        this.indexer = indexer;
     }
 
     public Optional<ServeResponseDTO> serveFast(String country, String language, String device, String os,
@@ -50,10 +52,17 @@ public class AdDeliveryService {
 
     public Optional<ServeResponseDTO> serve(String country, String language, String device, String os,
                                             String ip, String domain, String browser, String iab) {
+        // 1) try fast
         var fast = serveFast(country, language, device, os, ip, domain, browser, iab);
         if (fast.isPresent()) return fast;
+
+        // 2) lazily index this coarse key and retry fast exactly once
+        indexer.ensureIndexed(country, language, device, os);
+        fast = serveFast(country, language, device, os, ip, domain, browser, iab);
+        if (fast.isPresent()) return fast;
+
+        // 3) optional DB fallback (rare)
         if (!dbFallbackEnabled) return Optional.empty();
-        // *** FIX: fallback signature is (country, language, device, os) ***
         return fallback.serveAdFallback(country, language, device, os, ip, domain, browser, iab);
     }
 

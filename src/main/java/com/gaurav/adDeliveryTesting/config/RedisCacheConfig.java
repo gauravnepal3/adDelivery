@@ -35,8 +35,8 @@ public class RedisCacheConfig {
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient(RedisProperties props) {
         Config cfg = new Config();
-        cfg.setThreads(54);        // adjust to ~1–2x cores
-        cfg.setNettyThreads(96);
+        cfg.setThreads(32);        // adjust to ~1–2x cores
+        cfg.setNettyThreads(64);
 
         var single = cfg.useSingleServer()
                 .setAddress((props.getSsl().isEnabled() ? "rediss://" : "redis://") + props.getHost() + ":" + props.getPort())

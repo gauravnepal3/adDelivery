@@ -83,21 +83,15 @@ public class CampaignMetadataCache {
     }
 
 
-    // inside CampaignMetadataCache
     public void put(Campaign c) {
-        cache.put(
+        cache.put(c.getCampaignId(), new CampaignResponseDto(
                 c.getCampaignId(),
-                new CampaignResponseDto(
-                        c.getCampaignId(),
-                        c.getDeliveryLink(),
-                        MoneyUtils.toCents(c.getBiddingRate()),
-                        MoneyUtils.toCents(c.getRemainingBudget())
-                )
-        );
+                c.getDeliveryLink(),
+                MoneyUtils.toCents(c.getBiddingRate()),
+                MoneyUtils.toCents(c.getRemainingBudget())
+        ));
     }
-    public void invalidateCampaignListCache() {
-        // no-op unless you add a list cache; keep method to satisfy calls
-    }
+    public void invalidateCampaignListCache() { /* no-op unless you had a list cache */ }
 
     /** Optional helper if you’re reindexing many campaigns. */
     public void reloadBatchFromDb(Collection<Integer> ids) {
