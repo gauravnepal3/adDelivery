@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-produser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prodpass}
+      POSTGRES_DB: prod_db
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-produser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --save ""
+      - --appendonly no
+      - --requirepass ${REDIS_PASSWORD:-redispw}
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispw}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  java-app:
+    build:
+      context: .
+      dockerfile: Dockerfile   # or Dockerfile if you prefer
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/prod_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-produser}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-prodpass}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-redispw}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports: ["8080:8080"]
+    restart: unless-stopped
+    # uncomment if you want live code mounts with bootRun:
+    # volumes:
+    #   - .:/app
+
+volumes:
+  pgdata_dev:

@@ -1,170 +1,210 @@
 package com.gaurav.adDeliveryTesting.service;
 
-import com.gaurav.adDeliveryTesting.config.RedisCacheConfig;
 import com.gaurav.adDeliveryTesting.model.Campaign;
-import org.redisson.api.RScript;
-import org.redisson.api.RedissonClient;
-import org.redisson.client.codec.StringCodec;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.connection.RedisStringCommands;
+import org.springframework.data.redis.connection.StringRedisConnection;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.Collections;
-import java.util.List;
+import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class CampaignCacheService {
 
-    private static final Logger log = LoggerFactory.getLogger(CampaignCacheService.class);
-
-    // Use Spring Boot's auto-configured StringRedisTemplate (plain string keys/values)
-    private final StringRedisTemplate zsetRedis;
-    private final RedissonClient redisson;
+    private final StringRedisTemplate redis;
     @Autowired
-    private RedisCacheConfig cacheConfig;
-    public CampaignCacheService(StringRedisTemplate stringRedisTemplate, RedissonClient redisson) {
-        this.zsetRedis = stringRedisTemplate;
-        this.redisson = redisson;
+    private CampaignMetadataCache meta;
+    public CampaignCacheService(StringRedisTemplate redis) {
+        this.redis = redis;
     }
 
-    private String filterKey(String country, String language, String os, String browser) {
-        return String.format("campaign:filters:%s:%s:%s:%s",
-                (os == null ? "any" : os),
-                (browser == null ? "any" : browser),
-                (language == null ? "any" : language),
-                (country == null ? "any" : country));
-    }
+    // ---------- key builders ----------
 
-    private String membershipKey(int campaignId) {
-        // A SET containing all ZSET keys this campaign was added to
-        return "campaign:zsetkeys:" + campaignId;
+    public static String zsetKey(String country, String language, String device, String os) {
+        return "campaign:filters:" + part(os) + ":" + part(device) + ":" + part(language) + ":" + part(country);
+    }
+    public static String rrKey(String country, String language, String device, String os) {
+        return "campaign:rr:" + part(os) + ":" + part(device) + ":" + part(language) + ":" + part(country);
+    }
+    public static String allowBrowserKey(int id) { return "campaign:allow:browser:" + id; }
+    public static String allowIabKey(int id)     { return "campaign:allow:iab:" + id; }
+    public static String allowIpKey(int id)      { return "campaign:allow:ip:" + id; }
+    public static String allowDomainKey(int id)  { return "campaign:allow:domain:" + id; }
+
+    public static String blockIpKey(int id)      { return "campaign:block:ip:" + id; }
+    public static String blockDomainKey(int id)  { return "campaign:block:domain:" + id; }
+
+    private static String part(String s) {
+        return (s == null || s.isBlank()) ? "any" : s;
     }
 
     private static long toCents(BigDecimal bid) {
-        // rely on DB having scale=2; if not, you can setScale(2) first
         return bid.movePointRight(2).longValueExact();
     }
 
-    /** Convert any legacy member like ""1"" → "1" then parse to Integer. */
-    private Integer parseMember(Object member) {
-        if (member == null) return null;
-        String s = member.toString();
-        if (s.length() >= 2 && s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"') {
-            s = s.substring(1, s.length() - 1);
-        }
-        return Integer.valueOf(s);
+    // ---------- Non-pipelined helpers (used at request-time occasionally) ----------
+
+    public void addCampaignToZset(Campaign c, String country, String language, String device, String os) {
+        String key = zsetKey(country, language, device, os);
+        String member = Integer.toString(c.getCampaignId());
+        double score = (double) toCents(c.getBiddingRate());
+        redis.opsForZSet().add(key, member, score);
+        redis.opsForSet().add("campaign:zsetkeys:" + c.getCampaignId(), key);
     }
 
-    // =======================
-    // Write operations
-    // =======================
-
-    public void addCampaign(Campaign campaign, String country, String language, String os, String browser) {
-        String key = filterKey(country, language, os, browser);
-        String member = String.valueOf(campaign.getCampaignId());
-        double score = (double) toCents(campaign.getBiddingRate()); // integer cents as double
-        zsetRedis.opsForZSet().add(key, member, score);
-        // Track membership for O(K) removals later (K = number of keys this id is in)
-        zsetRedis.opsForSet().add(membershipKey(campaign.getCampaignId()), key);
-    }
-
-    public void updateCampaignBudget(Campaign campaign, String country, String language, String os, String browser) {
-        addCampaign(campaign, country, language, os, browser);
-    }
-
-    /** Remove this campaign from all ZSETs it belongs to (using the tracked membership set). */
-    public void removeCampaignEverywhere(Integer campaignId) {
-        String mKey = membershipKey(campaignId);
-        Set<String> keys = zsetRedis.opsForSet().members(mKey);
-        String member = String.valueOf(campaignId);
-
-        if (keys != null) {
-            for (String k : keys) {
-                try {
-                    zsetRedis.opsForZSet().remove(k, member);
-                } catch (Exception e) {
-                    log.warn("ZREM failed: campaign {} from key {}", campaignId, k, e);
-                }
-            }
-        }
-        zsetRedis.delete(mKey);
-    }
-
-
-    public Integer getBestCampaignId(String country, String language, String os, String browser) {
-        String key = filterKey(country, language, os, browser);
-
-        final String LUA = """
-            -- KEYS[1] = zset key
-            local top = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
-            if (not top) or (#top == 0) then return {0} end
-            local topScore = tonumber(top[2])
-            if (not topScore) then return {0} end
-            local ties = redis.call('ZRANGEBYSCORE', KEYS[1], topScore, topScore)
-            if (not ties) or (#ties == 0) then return {0} end
-            -- randomize among ties; seed with TIME so concurrent calls vary
-            local t = redis.call('TIME')
-            local seed = tonumber(t[1]) * 1000000 + tonumber(t[2])
-            math.randomseed(seed)
-            local idx = math.random(#ties)
-            return {1, ties[idx]}
-        """;
-
-        try {
-            RScript rscript = redisson.getScript(StringCodec.INSTANCE);
-            @SuppressWarnings("unchecked")
-            List<Object> res = (List<Object>) rscript.eval(
-                    RScript.Mode.READ_ONLY,
-                    LUA,
-                    RScript.ReturnType.MULTI,
-                    Collections.singletonList(key)
-            );
-
-            if (res == null || res.isEmpty()) return null;
-            Number code = (Number) res.get(0);
-            if (code == null || code.intValue() != 1) return null;
-
-            Object member = (res.size() > 1 ? res.get(1) : null);
-            return parseMember(member);
-        } catch (Exception e) {
-            log.warn("Lua tie-break failed on key {}. Falling back to client-side tie-break.", key, e);
-            return getBestCampaignIdClient(country, language, os, browser);
+    public void writeAllowSet(String key, Collection<String> values) {
+        redis.delete(key);
+        if (values == null || values.isEmpty()) return;
+        for (String v : values) {
+            if (v == null) continue;
+            String t = v.trim();
+            if (!t.isEmpty()) redis.opsForSet().add(key, t);
         }
     }
 
-
-    private Integer getBestCampaignIdClient(String country, String language, String os, String browser) {
-        String key = filterKey(country, language, os, browser);
-
-        Set<ZSetOperations.TypedTuple<String>> topOne =
-                zsetRedis.opsForZSet().reverseRangeWithScores(key, 0, 0);
-        if (topOne == null || topOne.isEmpty()) return null;
-
-        ZSetOperations.TypedTuple<String> t = topOne.iterator().next();
-        Double topScore = t.getScore();
-        if (topScore == null) return null;
-
-        // exact match (integer cents)
-        Set<String> ties = zsetRedis.opsForZSet().rangeByScore(key, topScore, topScore);
-        if (ties == null || ties.isEmpty()) return null;
-
-        int pick = ThreadLocalRandom.current().nextInt(ties.size());
-        String chosen = ties.stream().skip(pick).findFirst().orElse(null);
-        return parseMember(chosen);
+    public void writeBlockSet(String key, Collection<String> values) {
+        redis.delete(key);
+        if (values == null || values.isEmpty()) return;
+        for (String v : values) {
+            if (v == null) continue;
+            String t = v.trim();
+            if (!t.isEmpty()) redis.opsForSet().add(key, t);
+        }
     }
 
+    public java.util.Set<String> lowerAll(java.util.Set<String> in) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (in == null) return out;
+        for (String s : in) {
+            if (s == null) continue;
+            String t = s.trim().toLowerCase();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
 
     public Set<ZSetOperations.TypedTuple<String>> debugRangeWithScores(String key) {
-        return zsetRedis.opsForZSet().reverseRangeWithScores(key, 0, -1);
+        return redis.opsForZSet().reverseRangeWithScores(key, 0, -1);
     }
 
-    public String debugFilterKey(String country, String language, String os, String browser) {
-        return filterKey(country, language, os, browser);
+    public String debugFilterKey(String country, String language, String device, String os) {
+        return zsetKey(country, language, device, os);
+    }
+
+    // ---------- Pipelined writers (used during warmup) ----------
+
+    public void addCampaignToZsetPipelined(StringRedisConnection c, Campaign campaign,
+                                           String country, String language, String device, String os) {
+        String key    = zsetKey(country, language, device, os);
+        String member = Integer.toString(campaign.getCampaignId());
+        double score  = (double) toCents(campaign.getBiddingRate());
+
+        // ZADD
+        c.zAdd(key, score, member);
+        // track membership
+        c.sAdd(("campaign:zsetkeys:" + campaign.getCampaignId()), key);
+    }
+
+    public void writeAllowSetPipelined(StringRedisConnection c, String key, Collection<String> values) {
+        c.del(key);
+        if (values == null || values.isEmpty()) return;
+        for (String v : values) {
+            if (v == null) continue;
+            String t = v.trim();
+            if (!t.isEmpty()) c.sAdd(key, t);
+        }
+    }
+    public void removeCampaignEverywhere(int campaignId) {
+        // Remove all zset memberships for this campaign
+        String zsetKeySet = "campaign:zsetkeys:" + campaignId;
+        var keys = redis.opsForSet().members(zsetKeySet);
+        if (keys != null) {
+            for (String key : keys) {
+                redis.opsForZSet().remove(key, String.valueOf(campaignId));
+            }
+            redis.delete(zsetKeySet);
+        }
+
+        // Remove allow/block sets
+        redis.delete(allowBrowserKey(campaignId));
+        redis.delete(allowIabKey(campaignId));
+        redis.delete(allowIpKey(campaignId));
+        redis.delete(allowDomainKey(campaignId));
+        redis.delete(blockIpKey(campaignId));
+        redis.delete(blockDomainKey(campaignId));
+
+        // Remove budget keys
+        redis.delete("campaign:budget:" + campaignId);
+        redis.delete("campaign:delta:" + campaignId);
+
+        // Optionally: also remove from touched set
+        redis.opsForSet().remove("campaign:touched", String.valueOf(campaignId));
+
+    }
+
+    public void reindexCampaign(Campaign c) {
+        int id = c.getCampaignId();
+
+        // --- Redis ---
+        redis.delete(allowBrowserKey(id));
+        redis.delete(allowIabKey(id));
+        redis.delete(allowIpKey(id));
+        redis.delete(allowDomainKey(id));
+        redis.delete(blockIpKey(id));
+        redis.delete(blockDomainKey(id));
+
+        String zsetTracker = "campaign:zsetkeys:" + id;
+        Set<String> zsets = redis.opsForSet().members(zsetTracker);
+        if (zsets != null) {
+            for (String z : zsets) {
+                redis.opsForZSet().remove(z, String.valueOf(id));
+            }
+        }
+        redis.delete(zsetTracker);
+
+        indexCampaign(c); // put fresh filters back
+
+        // --- Caffeine ---
+        // after you’ve rebuilt all Redis keys for this campaign:
+        meta.invalidate(id);             // drop old per-campaign snapshot
+        meta.reloadFromDb(id);           // load fresh snapshot now
+        meta.invalidateCampaignListCache(); // (optional) force the @Cacheable("campaign") list to refresh on next call   // load fresh snapshot
+    }
+
+    public void indexCampaign(Campaign c) {
+        var f = c.getFilters();
+        if (f == null) return;
+
+        // Allow/deny sets
+        writeAllowSet(allowBrowserKey(c.getCampaignId()), f.getBrowsers());
+        writeAllowSet(allowIabKey(c.getCampaignId()),     f.getIabCategory());
+        writeAllowSet(allowIpKey(c.getCampaignId()),      f.getAllowedIP());
+        writeAllowSet(allowDomainKey(c.getCampaignId()),  lowerAll(f.getAllowedDomain()));
+
+        writeBlockSet(blockIpKey(c.getCampaignId()),      f.getExcludedIP());
+        writeBlockSet(blockDomainKey(c.getCampaignId()),  lowerAll(f.getExcludedDomain()));
+
+        // ZSET memberships (coarse)
+        for (String country : f.getCountries())
+            for (String lang    : f.getLanguages())
+                for (String device  : f.getDevices())
+                    for (String os   : f.getOsList()) {
+                        addCampaignToZset(c, country, lang, device, os);
+                    }
+    }
+
+    public void writeBlockSetPipelined(StringRedisConnection c, String key, Collection<String> values) {
+        c.del(key);
+        if (values == null || values.isEmpty()) return;
+        for (String v : values) {
+            if (v == null) continue;
+            String t = v.trim();
+            if (!t.isEmpty()) c.sAdd(key, t);
+        }
     }
 }
