@@ -82,11 +82,6 @@ public class AdDeliveryController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
-    @PostMapping("/warm")
-    public ResponseEntity<String> warm() {
-        warm.warm();
-        return ResponseEntity.ok("warm started & completed");
-    }
     private static String header(HttpServletRequest req, String name) {
         String v = req.getHeader(name);
         return (v == null || v.isBlank()) ? null : v.trim();
