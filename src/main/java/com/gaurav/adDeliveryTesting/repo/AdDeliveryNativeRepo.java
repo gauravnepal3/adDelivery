@@ -12,7 +12,7 @@ public interface AdDeliveryNativeRepo extends Repository<com.gaurav.adDeliveryTe
     @Query(value = """
         SELECT c.campaign_id
         FROM campaign c
-        JOIN campaignfilters f ON f.campaign_id = c.campaign_id
+        JOIN campaign_filters f ON f.campaign_id = c.campaign_id
         WHERE c.remaining_budget > 0
           AND EXISTS (SELECT 1 FROM campaign_countries cc
                       WHERE cc.filter_id = f.id AND cc.country = :country)
