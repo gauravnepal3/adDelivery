@@ -1,18 +1,26 @@
 package com.gaurav.adDeliveryTesting.service;
 
 import com.gaurav.adDeliveryTesting.model.Campaign;
+import com.gaurav.adDeliveryTesting.model.CampaignFilters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
-
+import org.redisson.api.*;
+import org.redisson.client.codec.StringCodec;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Set;
-
+// imports to add at top of CampaignCacheService.java
+import org.redisson.api.RBatch;
+import org.redisson.api.RBucketAsync;
+import org.redisson.api.RMapAsync;
+import org.redisson.api.RScoredSortedSetAsync;
+import org.redisson.api.RSetAsync;
+import org.redisson.client.codec.StringCodec;
 @Service
 public class CampaignCacheService {
 
@@ -22,6 +30,68 @@ public class CampaignCacheService {
 
     public CampaignCacheService(StringRedisTemplate redis) {
         this.redis = redis;
+    }
+
+    // CampaignCacheService.java (inside the class)
+
+    // Write one full campaign using a Redisson batch (no result collection).
+    public static void writeCampaignToBatch(RBatch batch, Campaign c) {
+        String idStr = Integer.toString(c.getCampaignId());
+
+        // budget & delta
+        RMapAsync<String,String> budgetMap =
+                batch.getMap("campaign:budget:" + idStr, StringCodec.INSTANCE);
+        budgetMap.fastPutAsync("remaining",
+                Long.toString(c.getRemainingBudget() == null
+                        ? 0L
+                        : c.getRemainingBudget().movePointRight(2).longValueExact()));
+
+        RBucketAsync<String> deltaBucket =
+                batch.getBucket("campaign:delta:" + idStr, StringCodec.INSTANCE);
+        deltaBucket.setAsync("0");
+
+        CampaignFilters f = c.getFilters();
+        if (f == null) return;
+
+        // allow/block sets
+        writeSetBatch(batch, allowBrowserKey(c.getCampaignId()), f.getBrowsers());
+        writeSetBatch(batch, allowIabKey(c.getCampaignId()),     f.getIabCategory());
+        writeSetBatch(batch, allowIpKey(c.getCampaignId()),      f.getAllowedIP());
+        writeSetBatch(batch, allowDomainKey(c.getCampaignId()),  toLowerSet(f.getAllowedDomain()));
+
+        writeSetBatch(batch, blockIpKey(c.getCampaignId()),      f.getExcludedIP());
+        writeSetBatch(batch, blockDomainKey(c.getCampaignId()),  toLowerSet(f.getExcludedDomain()));
+
+        // zset memberships
+        for (String country : f.getCountries())
+            for (String lang : f.getLanguages())
+                for (String device : f.getDevices())
+                    for (String os : f.getOsList()) {
+                        String zkey = zsetKey(country, lang, device, os);
+                        double score = (double) c.getBiddingRate().movePointRight(2).longValueExact();
+
+                        RScoredSortedSetAsync<String> z =
+                                batch.getScoredSortedSet(zkey, StringCodec.INSTANCE);
+                        z.addAsync(score, idStr);
+
+                        RSetAsync<String> membership =
+                                batch.getSet(membershipKey(c.getCampaignId()), StringCodec.INSTANCE);
+                        membership.addAsync(zkey);
+                    }
+    }
+
+    // Batch set writer using async types from RBatch
+    private static void writeSetBatch(RBatch batch, String key, java.util.Collection<String> vals) {
+        RSetAsync<String> set = batch.getSet(key, StringCodec.INSTANCE);
+        set.deleteAsync();
+        if (vals == null || vals.isEmpty()) return;
+
+        java.util.List<String> cleaned = vals.stream()
+                .filter(v -> v != null && !v.trim().isEmpty())
+                .map(String::trim)
+                .toList();
+
+        if (!cleaned.isEmpty()) set.addAllAsync(cleaned);
     }
 
     // ---------- Key builders ----------

@@ -5,111 +5,91 @@ import com.gaurav.adDeliveryTesting.model.Campaign;
 import com.gaurav.adDeliveryTesting.model.CampaignFilters;
 import com.gaurav.adDeliveryTesting.repo.AdDeliveryNativeRepo;
 import com.gaurav.adDeliveryTesting.repo.AdDeliveryRepo;
-import com.gaurav.adDeliveryTesting.utils.MoneyUtils;
+import org.redisson.api.BatchOptions;
+import org.redisson.api.RBatch;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.data.redis.core.SessionCallback;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.redisson.client.codec.StringCodec;
 import org.springframework.stereotype.Service;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.RedisOperations;
-import org.springframework.data.redis.core.SessionCallback;
+
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class LazyIndexer {
 
     private final AdDeliveryNativeRepo nativeRepo;
     private final AdDeliveryRepo repo;
-    private final StringRedisTemplate redis;
     private final RedissonClient redisson;
     private final CampaignMetadataCache meta;
-    private final CampaignCacheService cache;
 
     // tuneables
-    private static final int TOP_LIMIT_PER_KEY = 500;      // cap loaded campaigns per coarse key
-    private static final Duration KEY_TTL = Duration.ofHours(6); // optional TTL to auto-evict cold keys
+    private static final int TOP_LIMIT_PER_KEY = 100;           // cap per coarse key
+    private static final Duration KEY_TTL = Duration.ofHours(6); // optional TTL
 
     public LazyIndexer(AdDeliveryNativeRepo nativeRepo,
                        AdDeliveryRepo repo,
-                       StringRedisTemplate redis,
                        RedissonClient redisson,
-                       CampaignMetadataCache meta,
-                       CampaignCacheService cache) {
+                       CampaignMetadataCache meta) {
         this.nativeRepo = nativeRepo;
         this.repo = repo;
-        this.redis = redis;
         this.redisson = redisson;
         this.meta = meta;
-        this.cache = cache;
     }
 
-    /** Ensures the coarse key zset + per-campaign allow/block sets exist; idempotent. */
+    /** Ensure zset + per-campaign sets exist for a coarse key; idempotent and memory-safe. */
     public void ensureIndexed(String country, String language, String device, String os) {
         final String zsetKey = CampaignCacheService.zsetKey(country, language, device, os);
-        // quick existence check
-        Long size = redis.opsForZSet().zCard(zsetKey);
+
+        // Cheap existence check
+        Long size = redisson.getScoredSortedSet(zsetKey, StringCodec.INSTANCE).sizeInMemory();
         if (size != null && size > 0) return;
 
-        // lock per coarse key to avoid thundering herd
+        // Lock per coarse key so only one thread builds it
         RLock lock = redisson.getLock("lock:index:" + zsetKey);
-        boolean ok = false;
+        boolean locked = false;
         try {
-            ok = lock.tryLock();
-            if (!ok) return; // someone else is building it; let caller retry serve
-            // recheck under lock
-            size = redis.opsForZSet().zCard(zsetKey);
+            locked = lock.tryLock(0, 30, TimeUnit.SECONDS);
+            if (!locked) return;
+
+            // Recheck under lock
+            size = redisson.getScoredSortedSet(zsetKey, StringCodec.INSTANCE).sizeInMemory();
             if (size != null && size > 0) return;
 
-            // fetch top ids for this key
+            // 1) Get top IDs for this key
             List<Integer> ids = nativeRepo.findTopIdsForCoarseKey(country, language, device, os, TOP_LIMIT_PER_KEY);
             if (ids.isEmpty()) return;
 
-            // load full entities with filters using the batch entity graph
+            // 2) Load entities + filters with an entity graph
             List<Campaign> campaigns = repo.findBatchWithFilters(ids);
 
-            // write everything in one pipeline
-            redis.executePipelined(new SessionCallback<Object>() {
-                @Override
-                @SuppressWarnings("unchecked")
-                public Object execute(RedisOperations operations) throws DataAccessException {
-                    RedisOperations<String,String> ops = (RedisOperations<String,String>) operations;
+            // 3) Warm metadata cache from entities (no extra DB)
+            for (Campaign c : campaigns) {
+                meta.put(c);
+            }
 
-                    for (Campaign c : campaigns) {
-                        String id = Integer.toString(c.getCampaignId());
-                        // budget + delta
-                        ops.opsForHash().put("campaign:budget:" + id, "remaining",
-                                Long.toString(MoneyUtils.toCents(c.getRemainingBudget())));
-                        ops.opsForValue().set("campaign:delta:" + id, "0");
+            // 4) Write everything via Redisson batch without collecting results
+            RBatch batch = redisson.createBatch(BatchOptions.defaults()
+                    .skipResult()
+                    .responseTimeout(2, TimeUnit.SECONDS)
+                    .retryAttempts(1)
+                    .retryInterval(100, TimeUnit.MILLISECONDS));
 
-                        CampaignFilters f = c.getFilters();
-                        if (f == null) continue;
+            for (Campaign c : campaigns) {
+                CampaignCacheService.writeCampaignToBatch(batch, c);
+            }
 
-                        CampaignCacheService.writeAllowSetOps(ops, CampaignCacheService.allowBrowserKey(c.getCampaignId()), f.getBrowsers());
-                        CampaignCacheService.writeAllowSetOps(ops, CampaignCacheService.allowIabKey(c.getCampaignId()),     f.getIabCategory());
-                        CampaignCacheService.writeAllowSetOps(ops, CampaignCacheService.allowIpKey(c.getCampaignId()),      f.getAllowedIP());
-                        CampaignCacheService.writeAllowSetOps(ops, CampaignCacheService.allowDomainKey(c.getCampaignId()),
-                                CampaignCacheService.toLowerSet(f.getAllowedDomain()));
+            // Optional: TTL on this coarse key (helps auto-evict cold keys)
+            batch.getKeys().expireAsync(zsetKey, KEY_TTL.toSeconds(), java.util.concurrent.TimeUnit.SECONDS);
 
-                        CampaignCacheService.writeBlockSetOps(ops, CampaignCacheService.blockIpKey(c.getCampaignId()),     f.getExcludedIP());
-                        CampaignCacheService.writeBlockSetOps(ops, CampaignCacheService.blockDomainKey(c.getCampaignId()),
-                                CampaignCacheService.toLowerSet(f.getExcludedDomain()));
-
-                        for (String ctry : f.getCountries())
-                            for (String lang : f.getLanguages())
-                                for (String dev : f.getDevices())
-                                    for (String osItem : f.getOsList())
-                                        CampaignCacheService.addCampaignToZsetOps(ops, c, ctry, lang, dev, osItem);
-                    }
-
-                    // optional TTL on the coarse zset
-                    ops.expire(CampaignCacheService.zsetKey(country, language, device, os), java.time.Duration.ofHours(6));
-                    return null;
-                }
-            });
+            batch.execute(); // fire-and-forget, no giant List in heap
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         } finally {
-            if (ok) lock.unlock();
+            if (locked) {
+                try { lock.unlock(); } catch (Exception ignored) {}
+            }
         }
     }
 }
