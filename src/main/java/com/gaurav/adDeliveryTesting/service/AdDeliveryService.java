@@ -4,6 +4,7 @@ import com.gaurav.adDeliveryTesting.repo.AdDeliveryPickRepo;
 import com.gaurav.adDeliveryTesting.repo.AdDeliveryRepo;
 import com.gaurav.adDeliveryTesting.repo.BudgetRepo;
 import com.gaurav.adDeliveryTesting.responseDto.ServeResponseDTO;
+import com.gaurav.adDeliveryTesting.utils.MoneyUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
@@ -24,8 +25,9 @@ public class AdDeliveryService {
     @Autowired
     private AdDeliveryPickRepo pickRepo;
 
+
     @Autowired
-    private BudgetRepo budgetRepo;
+    private BudgetDbService budgetDbService;
     @Value("${adserve.dbFallbackEnabled:true}")
     private boolean dbFallbackEnabled;
 
@@ -80,14 +82,16 @@ public class AdDeliveryService {
         if (metaDto == null) return Optional.empty();
 
 
-        var spentRem = budgetRepo.trySpend(id, com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(metaDto.bidCents()));
+        var newRemaining = budgetDbService.trySpendAndGetRemaining(id, MoneyUtils.fromCents(metaDto.bidCents()));
 
-        if (spentRem == 0) return Optional.empty(); // race lost
+        if (newRemaining == null) {
+            // no spend -> treat as no-serve
+            return java.util.Optional.empty();
+        }
 
         // 4) fire-and-forget: index this id into Redis for this coarse key
         indexer.enqueueIndex(country, language, device, os, id);
 // (optional) only if you need to show fresh remaining to the client:
-        BigDecimal newRemaining = budgetRepo.getRemaining(id);
         // 5) return response immediately
         return Optional.of(new ServeResponseDTO(
                 metaDto.campaignId(),

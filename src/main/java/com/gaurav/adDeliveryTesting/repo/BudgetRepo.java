@@ -9,19 +9,18 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 
-public interface BudgetRepo extends Repository<Campaign, Integer> {
+public interface BudgetRepo extends org.springframework.data.repository.Repository<com.gaurav.adDeliveryTesting.model.Campaign, Integer> {
 
-    // Atomic spend: subtract if enough remaining. Returns 1 if updated, 0 if not.
-    @Modifying
-    @Query(value = """
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @org.springframework.data.jpa.repository.Query(value = """
         UPDATE campaign
         SET remaining_budget = remaining_budget - :delta
         WHERE campaign_id = :id
           AND remaining_budget >= :delta
         """, nativeQuery = true)
-    int trySpend(@Param("id") int id, @Param("delta") BigDecimal delta);
+    int trySpend(@org.springframework.data.repository.query.Param("id") int id,
+                 @org.springframework.data.repository.query.Param("delta") java.math.BigDecimal delta);
 
-    // Read the (new) remaining balance when needed
-    @Query("select c.remainingBudget from Campaign c where c.campaignId = :id")
-    BigDecimal getRemaining(@Param("id") int id);
+    @org.springframework.data.jpa.repository.Query("select c.remainingBudget from Campaign c where c.campaignId = :id")
+    java.math.BigDecimal getRemaining(@org.springframework.data.repository.query.Param("id") int id);
 }
