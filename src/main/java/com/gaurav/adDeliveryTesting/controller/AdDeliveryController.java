@@ -41,16 +41,6 @@ public class AdDeliveryController {
         return new ResponseEntity<>(service.getCampaign(), HttpStatus.OK);
     }
 
-    @PostMapping("/reindex/{id}")
-    public ResponseEntity<String> reindex(@PathVariable int id) {
-        return repo.findById(id)
-                .map(c -> {
-                    cache.reindexCampaign(c);
-                    return ResponseEntity.ok("Reindexed campaign " + id);
-                })
-                .orElseGet(() -> ResponseEntity.notFound().build());
-    }
-
     @GetMapping("/serve")
     public ResponseEntity<?> serveAd(HttpServletRequest req) {
         final String country  = header(req, "X-Country");

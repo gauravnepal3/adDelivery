@@ -55,11 +55,6 @@ public class CampaignMetadataCache {
         return cache.get(id);
     }
 
-    /** Put/overwrite with a fresh Campaign snapshot (used after DB update). */
-    public void put(Campaign campaign) {
-        Objects.requireNonNull(campaign, "campaign");
-        cache.put(campaign.getCampaignId(), toDto(campaign));
-    }
 
     /** Warm a bunch at once (used by startup warmup). */
     public void warmAll(Iterable<Campaign> all) {
@@ -87,12 +82,21 @@ public class CampaignMetadataCache {
         return fresh;
     }
 
-    /** Optional: clear the list cache used by @Cacheable("campaign") getCampaign(). */
+
+    // inside CampaignMetadataCache
+    public void put(Campaign c) {
+        cache.put(
+                c.getCampaignId(),
+                new CampaignResponseDto(
+                        c.getCampaignId(),
+                        c.getDeliveryLink(),
+                        MoneyUtils.toCents(c.getBiddingRate()),
+                        MoneyUtils.toCents(c.getRemainingBudget())
+                )
+        );
+    }
     public void invalidateCampaignListCache() {
-        if (cacheManager != null) {
-            var c = cacheManager.getCache("campaign");
-            if (c != null) c.clear();  // clears the whole list cache
-        }
+        // no-op unless you add a list cache; keep method to satisfy calls
     }
 
     /** Optional helper if you’re reindexing many campaigns. */
