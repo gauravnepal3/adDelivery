@@ -14,7 +14,7 @@ services:
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       # optional: avoid dialect auto-detection on first boot
       SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
-      JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1024m -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
       SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "20"
       SPRING_JPA_PROPERTIES_HIBERNATE_JDBC_BATCH_SIZE: "500"
       SPRING_JPA_PROPERTIES_HIBERNATE_ORDER_INSERTS: "true"
