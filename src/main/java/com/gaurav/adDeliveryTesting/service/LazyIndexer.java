@@ -161,6 +161,37 @@ public class LazyIndexer {
         }
     }
 
+    @org.springframework.scheduling.annotation.Async
+    public void enqueueIndex(String country, String language, String device, String os, int id) {
+        var dto = meta.get(id);
+        if (dto == null) return;
+
+        String z = CampaignCacheService.zsetKey(country, language, device, os);
+        String rr= CampaignCacheService.rrKey(country, language, device, os);
+
+        // ZADD single member
+        redis.opsForZSet().add(z, Integer.toString(id), (double) dto.bidCents());
+        // keep a membership set so you can clean later if you want
+        redis.opsForSet().add(CampaignCacheService.membershipKey(id), z);
+
+        // TTL so cold keys evaporate
+        redis.expire(z, java.time.Duration.ofHours(6));
+        redis.expire(rr, java.time.Duration.ofHours(6));
+
+        // budgets/deltas (only if missing)
+        String bkey = "campaign:budget:" + id;
+        Boolean has = redis.hasKey(bkey);
+        if (has == null || !has) {
+            redis.opsForHash().put(bkey, "remaining", Long.toString(dto.remainingCents()));
+            redis.opsForValue().set("campaign:delta:" + id, "0");
+        }
+
+        // Allow/block sets: skip here (they’re only needed when present).
+        // Your Lua treats empty sets as "no constraint" already.
+        // If you need them, load per-campaign sets in small queries and SADD them,
+        // but do it in another async task to keep TTFB low.
+    }
+
     private static <T> Iterable<T> safe(Iterable<T> it) {
         return it == null ? new ArrayList<>() : it;
     }
