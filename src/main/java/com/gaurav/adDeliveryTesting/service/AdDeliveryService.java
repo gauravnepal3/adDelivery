@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 @Service
@@ -78,18 +79,21 @@ public class AdDeliveryService {
         var metaDto = meta.get(id); // cheap Caffeine lookup, loads one row if missing
         if (metaDto == null) return Optional.empty();
 
+
         var spentRem = budgetRepo.trySpend(id, com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(metaDto.bidCents()));
-        if (spentRem == null) return Optional.empty(); // race lost
+
+        if (spentRem == 0) return Optional.empty(); // race lost
 
         // 4) fire-and-forget: index this id into Redis for this coarse key
         indexer.enqueueIndex(country, language, device, os, id);
-
+// (optional) only if you need to show fresh remaining to the client:
+        BigDecimal newRemaining = budgetRepo.getRemaining(id);
         // 5) return response immediately
         return Optional.of(new ServeResponseDTO(
                 metaDto.campaignId(),
                 metaDto.deliveryLink(),
                 com.gaurav.adDeliveryTesting.utils.MoneyUtils.fromCents(metaDto.bidCents()),
-                spentRem
+                newRemaining
         ));
     }
     @org.springframework.transaction.annotation.Transactional(readOnly = true)
