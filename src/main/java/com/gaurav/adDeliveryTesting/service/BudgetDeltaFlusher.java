@@ -32,7 +32,10 @@ public class BudgetDeltaFlusher {
     @Transactional
     public void flushDeltas() {
         // Be explicit: RSet<String>, not var/RSet<Object>
-        RSet<String> touched = redisson.getSet("campaign:touched", StringCodec.INSTANCE);
+        // Correct
+        RSet<String> touched = redisson.getSet("campaign:touched", org.redisson.client.codec.StringCodec.INSTANCE);
+// … use touched.removeRandom();
+// DO NOT use getSetAsync() or .removeRandomAsync() unless you await futures
 
         final int MAX_PER_FLUSH = 10_000; // tune
         java.util.List<Object[]> batch = new java.util.ArrayList<>(1024);
