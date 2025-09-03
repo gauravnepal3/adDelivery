@@ -28,8 +28,7 @@ public class AdDeliveryController {
     private  CampaignCacheService cache;
     @Autowired
     private  AdDeliveryRepo repo;
-    @Autowired
-    private TargetingWarmup warm;
+
 
     public AdDeliveryController(AdDeliveryService service, UserAgentParser parser) {
         this.service = service;
